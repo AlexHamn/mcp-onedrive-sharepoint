@@ -502,14 +502,25 @@ export async function handleMoveItem(args: any) {
     if (parentFolderId) {
       updateData.parentReference = { id: parentFolderId };
     } else if (parentFolderPath) {
-      // Need to resolve folder path to ID first
+      // Resolve the folder path to a driveItem id. If the lookup fails we
+      // must abort: silently skipping it (the old behavior) caused PATCHes
+      // that did nothing yet reported success to the caller.
       const driveRoot = getDriveRootEndpoint({ siteId, driveId });
       const folderEndpoint = `${driveRoot}/root:/${parentFolderPath}`;
 
       const folderResponse = await client.get<DriveItem>(folderEndpoint);
-      if (folderResponse.success && folderResponse.data) {
-        updateData.parentReference = { id: folderResponse.data.id };
+      if (!folderResponse.success || !folderResponse.data?.id) {
+        throw new Error(
+          `Parent folder not found at path: ${parentFolderPath}`,
+        );
       }
+      updateData.parentReference = { id: folderResponse.data.id };
+    }
+
+    if (Object.keys(updateData).length === 0) {
+      throw new Error(
+        "move_item requires at least one of: newName, parentFolderId, parentFolderPath",
+      );
     }
 
     const response = await client.patch<DriveItem>(endpoint, updateData);
@@ -945,11 +956,12 @@ export const copyItem: Tool = {
       },
       destinationFolderId: {
         type: "string",
-        description: "Destination folder ID",
+        description: "Destination folder ID (relative to the destination drive)",
       },
       destinationFolderPath: {
         type: "string",
-        description: "Alternative: destination folder path",
+        description:
+          "Alternative: destination folder path (relative to the destination drive root)",
       },
       newName: {
         type: "string",
@@ -957,24 +969,40 @@ export const copyItem: Tool = {
       },
       siteId: {
         type: "string",
-        description: "SharePoint site ID (optional)",
+        description: "SharePoint site ID for the SOURCE item (optional)",
       },
       site: {
         type: "string",
-        description: "Known SharePoint site alias or canonical URL",
+        description:
+          "SharePoint site alias/URL for the SOURCE item (optional)",
       },
       siteUrl: {
         type: "string",
         description:
-          "Canonical SharePoint site URL (optional alternative to siteId)",
+          "Canonical SharePoint site URL for the SOURCE item (optional)",
       },
       driveId: {
         type: "string",
-        description: "Drive ID for a specific document library (optional)",
+        description: "Drive ID for the SOURCE item (optional)",
+      },
+      destinationDriveId: {
+        type: "string",
+        description: "Destination drive ID for cross-drive copies (optional)",
+      },
+      destinationSite: {
+        type: "string",
+        description:
+          "SharePoint site alias/URL for the DESTINATION drive (optional)",
       },
       destinationSiteId: {
         type: "string",
-        description: "Destination SharePoint site ID (optional)",
+        description:
+          "SharePoint site ID for the DESTINATION drive (optional). The default drive of this site will be used.",
+      },
+      destinationSiteUrl: {
+        type: "string",
+        description:
+          "Canonical SharePoint site URL for the DESTINATION drive (optional)",
       },
     },
     required: [],
@@ -990,7 +1018,10 @@ export async function handleCopyItem(args: any) {
       destinationFolderId,
       destinationFolderPath,
       newName,
+      destinationDriveId: rawDestinationDriveId,
+      destinationSite,
       destinationSiteId,
+      destinationSiteUrl,
     } = args;
     const { siteId, driveId } = await resolveFileDriveContext(args, client);
 
@@ -999,27 +1030,84 @@ export async function handleCopyItem(args: any) {
       "/copy",
     );
 
+    // Resolve the destination drive. If the caller passed only a destination
+    // site reference, we resolve it through the same site-resolver pipeline
+    // the rest of the tools use and pick up its default drive. Previously
+    // this handler assigned `destinationSiteId` directly to
+    // `parentReference.driveId`, which is wrong: a siteId is not a driveId
+    // and Graph would reject the copy.
+    const hasDestinationReference =
+      Boolean(rawDestinationDriveId) ||
+      Boolean(destinationSite) ||
+      Boolean(destinationSiteId) ||
+      Boolean(destinationSiteUrl);
+
+    const destinationContext = hasDestinationReference
+      ? await resolveDriveTargetContext(
+          {
+            site: destinationSite,
+            siteId: destinationSiteId,
+            siteUrl: destinationSiteUrl,
+            driveId: rawDestinationDriveId,
+          },
+          client,
+        )
+      : { siteId: undefined, driveId: undefined };
+
+    let destinationDriveId = destinationContext.driveId;
+    const destinationSiteResolvedId = destinationContext.siteId;
+
+    // If we have a destination site but no driveId (no registry entry,
+    // resolver-only), pick up its default drive id explicitly so we can
+    // populate parentReference.driveId.
+    if (
+      !destinationDriveId &&
+      destinationSiteResolvedId &&
+      hasDestinationReference
+    ) {
+      const driveLookup = await client.get<{ id: string }>(
+        `/sites/${destinationSiteResolvedId}/drive`,
+      );
+      if (driveLookup.success && driveLookup.data?.id) {
+        destinationDriveId = driveLookup.data.id;
+      } else {
+        throw new Error(
+          "Could not resolve the destination site's default drive",
+        );
+      }
+    }
+
+    if (hasDestinationReference && !destinationDriveId) {
+      throw new Error(
+        "Unable to resolve a destination drive from the provided destinationDriveId / destinationSite / destinationSiteId / destinationSiteUrl",
+      );
+    }
+
     const copyData: any = {
       parentReference: {},
     };
 
+    if (destinationDriveId) {
+      copyData.parentReference.driveId = destinationDriveId;
+    }
+
     if (destinationFolderId) {
       copyData.parentReference.id = destinationFolderId;
     } else if (destinationFolderPath) {
-      // Resolve destination path to ID
-      const destDriveRoot = destinationSiteId
-        ? getDriveRootEndpoint({ siteId: destinationSiteId })
+      // Resolve the destination folder relative to the destination drive
+      // (falling back to the source drive when no destination was specified).
+      const destDriveRoot = destinationDriveId
+        ? getDriveRootEndpoint({ driveId: destinationDriveId })
         : getDriveRootEndpoint({ siteId, driveId });
       const destEndpoint = `${destDriveRoot}/root:/${destinationFolderPath}`;
 
       const destResponse = await client.get<DriveItem>(destEndpoint);
-      if (destResponse.success && destResponse.data) {
-        copyData.parentReference.id = destResponse.data.id;
+      if (!destResponse.success || !destResponse.data?.id) {
+        throw new Error(
+          `Destination folder not found at path: ${destinationFolderPath}`,
+        );
       }
-    }
-
-    if (destinationSiteId) {
-      copyData.parentReference.driveId = destinationSiteId;
+      copyData.parentReference.id = destResponse.data.id;
     }
 
     if (newName) {
@@ -1035,8 +1123,9 @@ export async function handleCopyItem(args: any) {
         note: "Copy operation is asynchronous and may take some time to complete",
         itemId: itemId || "path-based",
         itemPath: itemPath || "id-based",
-        destinationFolderId,
-        destinationFolderPath,
+        destinationDriveId: destinationDriveId ?? null,
+        destinationFolderId: copyData.parentReference.id ?? null,
+        destinationFolderPath: destinationFolderPath ?? null,
         newName,
       });
     }
