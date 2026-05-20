@@ -101,6 +101,76 @@ test("health_check handler returns centralized MCP contract on success", async (
   assert.equal(payload.defaultDrive.id, "drive-1");
 });
 
+test("health_check reports client_credentials mode and skips /me probe", async () => {
+  let getTokenCalls = 0;
+  let getCalled = false;
+  __setUtilityDependenciesForTests({
+    getAuthInstance: async () => ({
+      isAuthenticated: async () => {
+        throw new Error("isAuthenticated must not be called in CC mode");
+      },
+      getAuthMode: () => "client_credentials",
+      getAccessToken: async () => {
+        getTokenCalls += 1;
+        return "app-token";
+      },
+    }),
+  });
+
+  __setGraphClientInstanceForTests({
+    healthCheck: async () => {
+      throw new Error("/me probe must not be called in CC mode");
+    },
+    get: async () => {
+      getCalled = true;
+      return { success: true };
+    },
+    cleanup: () => {},
+  } as any);
+
+  const response = (await handleHealthCheck({
+    includeUserInfo: true,
+    includeDriveInfo: true,
+  })) as ToolEnvelope;
+  const payload = parsePayload(response);
+
+  assert.equal(response.isError, undefined);
+  assert.equal(payload.status, "healthy");
+  assert.equal(payload.authentication.authMode, "client_credentials");
+  assert.equal(
+    payload.authentication.authMethod,
+    "Microsoft Graph Client Credentials Flow",
+  );
+  assert.equal(payload.authentication.isAuthenticated, true);
+  assert.equal(payload.apiConnectivity.probe, "client_credentials_token");
+  assert.equal(payload.user, undefined);
+  assert.equal(payload.defaultDrive, undefined);
+  assert.equal(getTokenCalls, 1);
+  assert.equal(getCalled, false, "/me/drive must not be called in CC mode");
+});
+
+test("health_check reports auth failure when CC token acquisition throws", async () => {
+  __setUtilityDependenciesForTests({
+    getAuthInstance: async () => ({
+      isAuthenticated: async () => false,
+      getAuthMode: () => "client_credentials",
+      getAccessToken: async () => {
+        throw new Error("invalid_client");
+      },
+    }),
+  });
+
+  __setGraphClientInstanceForTests({ cleanup: () => {} } as any);
+
+  const response = (await handleHealthCheck({})) as ToolEnvelope;
+  const payload = parsePayload(response);
+
+  assert.equal(response.isError, undefined);
+  assert.equal(payload.status, "authentication_required");
+  assert.equal(payload.authentication.isAuthenticated, false);
+  assert.match(payload.message, /client-credentials token/i);
+});
+
 test("health_check handler returns centralized MCP contract on error", async () => {
   __setUtilityDependenciesForTests({
     getAuthInstance: async () => ({

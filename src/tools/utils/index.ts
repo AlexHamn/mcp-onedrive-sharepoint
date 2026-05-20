@@ -12,13 +12,22 @@ import { resolveRequiredSharePointSite } from "../../sharepoint/site-resolver.js
 
 type UtilityDependencies = {
   getGraphClient: typeof getGraphClient;
-  getAuthInstance: () => Promise<{ isAuthenticated(): Promise<boolean> }>;
+  getAuthInstance: () => Promise<{
+    isAuthenticated(): Promise<boolean>;
+    getAuthMode?(): "client_credentials" | "device_code";
+    getAccessToken?(): Promise<string>;
+  }>;
 };
 
 let utilityDependencies: UtilityDependencies = {
   getGraphClient,
   getAuthInstance: async () =>
     (await import("../../auth/microsoft-graph-auth.js")).getAuthInstance(),
+};
+
+const AUTH_MODE_LABELS: Record<"client_credentials" | "device_code", string> = {
+  client_credentials: "Microsoft Graph Client Credentials Flow",
+  device_code: "Microsoft Graph Device Code Flow",
 };
 
 export function __setUtilityDependenciesForTests(
@@ -59,8 +68,22 @@ export async function handleHealthCheck(args: any) {
     const client = utilityDependencies.getGraphClient();
     const auth = await utilityDependencies.getAuthInstance();
 
-    // Check authentication status
-    const isAuthenticated = await auth.isAuthenticated();
+    // Check authentication status. /me-based probes only make sense in
+    // delegated mode; client-credentials is app-only and Graph rejects /me
+    // with "/me request is only valid with delegated authentication flow".
+    const authMode = auth.getAuthMode?.() ?? "device_code";
+
+    let isAuthenticated: boolean;
+    if (authMode === "client_credentials") {
+      try {
+        const token = await auth.getAccessToken?.();
+        isAuthenticated = Boolean(token);
+      } catch {
+        isAuthenticated = false;
+      }
+    } else {
+      isAuthenticated = await auth.isAuthenticated();
+    }
 
     const healthStatus: any = {
       server: "MCP OneDrive/SharePoint Server",
@@ -69,59 +92,75 @@ export async function handleHealthCheck(args: any) {
       timestamp: new Date().toISOString(),
       authentication: {
         isAuthenticated,
-        authMethod: "Microsoft Graph Device Code Flow",
+        authMethod: AUTH_MODE_LABELS[authMode],
+        authMode,
       },
     };
 
     if (!isAuthenticated) {
       healthStatus.status = "authentication_required";
-      healthStatus.message = "Please authenticate using the setup-auth script";
+      healthStatus.message =
+        authMode === "client_credentials"
+          ? "Failed to acquire client-credentials token. Verify MICROSOFT_GRAPH_CLIENT_ID / MICROSOFT_GRAPH_TENANT_ID / MICROSOFT_GRAPH_CLIENT_SECRET and admin consent."
+          : "Please authenticate using the setup-auth script";
 
       return jsonTextResponse(healthStatus);
     }
 
-    // Test API connectivity
-    const apiTest = await client.healthCheck();
-    healthStatus.apiConnectivity = {
-      status: apiTest.success ? "connected" : "failed",
-      graphApiVersion: "v1.0",
-      endpoint: "https://graph.microsoft.com/v1.0",
-    };
-
-    if (includeUserInfo && apiTest.success && apiTest.data) {
-      const userData = apiTest.data;
-      healthStatus.user = {
-        id: userData.user?.id,
-        displayName: userData.user?.displayName,
-        mail: userData.user?.mail,
-        userPrincipalName: userData.user?.userPrincipalName,
+    if (authMode === "client_credentials") {
+      // App identity has no /me and no personal drive. Health is implied by
+      // a successful token acquisition above; expose the connectivity stub
+      // so callers see a consistent shape.
+      healthStatus.apiConnectivity = {
+        status: "connected",
+        graphApiVersion: "v1.0",
+        endpoint: "https://graph.microsoft.com/v1.0",
+        probe: "client_credentials_token",
       };
-    }
+    } else {
+      const apiTest = await client.healthCheck();
+      healthStatus.apiConnectivity = {
+        status: apiTest.success ? "connected" : "failed",
+        graphApiVersion: "v1.0",
+        endpoint: "https://graph.microsoft.com/v1.0",
+        probe: "me",
+      };
 
-    if (includeDriveInfo && apiTest.success) {
-      try {
-        const driveResponse = await client.get<Drive>("/me/drive");
-        if (driveResponse.success && driveResponse.data) {
-          const drive = driveResponse.data;
+      if (includeUserInfo && apiTest.success && apiTest.data) {
+        const userData = apiTest.data;
+        healthStatus.user = {
+          id: userData.user?.id,
+          displayName: userData.user?.displayName,
+          mail: userData.user?.mail,
+          userPrincipalName: userData.user?.userPrincipalName,
+        };
+      }
+
+      if (includeDriveInfo && apiTest.success) {
+        try {
+          const driveResponse = await client.get<Drive>("/me/drive");
+          if (driveResponse.success && driveResponse.data) {
+            const drive = driveResponse.data;
+            healthStatus.defaultDrive = {
+              id: drive.id,
+              name: drive.name,
+              driveType: drive.driveType,
+              quota: drive.quota
+                ? {
+                    total: drive.quota.total,
+                    used: drive.quota.used,
+                    remaining: drive.quota.remaining,
+                    state: drive.quota.state,
+                  }
+                : null,
+            };
+          }
+        } catch {
           healthStatus.defaultDrive = {
-            id: drive.id,
-            name: drive.name,
-            driveType: drive.driveType,
-            quota: drive.quota
-              ? {
-                  total: drive.quota.total,
-                  used: drive.quota.used,
-                  remaining: drive.quota.remaining,
-                  state: drive.quota.state,
-                }
-              : null,
+            status: "access_error",
+            error: "Unable to access default drive",
           };
         }
-      } catch (error) {
-        healthStatus.defaultDrive = {
-          status: "access_error",
-          error: "Unable to access default drive",
-        };
       }
     }
 

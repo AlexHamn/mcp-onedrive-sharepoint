@@ -363,3 +363,59 @@ test("signOut clears both access token and persisted MSAL cache snapshots", asyn
     null,
   );
 });
+
+test("getAuthMode reflects whether a client secret is configured", () => {
+  const keychain = new InMemoryKeychain();
+  const fallbackStore = new InMemoryKeychain();
+
+  const dc = new MicrosoftGraphAuth(
+    { clientId: "id", tenantId: "common" },
+    { keychain, fallbackStore },
+  );
+  assert.equal(dc.getAuthMode(), "device_code");
+
+  const cc = new MicrosoftGraphAuth(
+    {
+      clientId: "id",
+      tenantId: "22222222-2222-2222-2222-222222222222",
+      clientSecret: "secret",
+    },
+    { keychain, fallbackStore },
+  );
+  assert.equal(cc.getAuthMode(), "client_credentials");
+});
+
+test("client-credentials getAccessToken acquires a fresh app token", async () => {
+  let acquireCalls = 0;
+  const cca = {
+    acquireTokenByClientCredential: async ({ scopes }: { scopes: string[] }) => {
+      acquireCalls += 1;
+      assert.deepEqual(scopes, ["https://graph.microsoft.com/.default"]);
+      return {
+        accessToken: "app-token",
+        expiresOn: new Date(Date.now() + 60 * 60 * 1000),
+      };
+    },
+  };
+
+  const auth = new MicrosoftGraphAuth(
+    {
+      clientId: "id",
+      tenantId: "22222222-2222-2222-2222-222222222222",
+      clientSecret: "secret",
+    },
+    {
+      keychain: new InMemoryKeychain(),
+      fallbackStore: new InMemoryKeychain(),
+      confidentialClientFactory: () => cca as never,
+    },
+  );
+
+  assert.equal(await auth.getAccessToken(), "app-token");
+  assert.equal(await auth.getAccessToken(), "app-token");
+  assert.equal(
+    acquireCalls,
+    1,
+    "second call should hit the in-memory cache, not the network",
+  );
+});

@@ -24,7 +24,9 @@ let cachedKeytar: SecureStore | null = null;
 const issuedFallbackWarnings = new Set<string>();
 function getDefaultKeychain(): SecureStore {
   if (!cachedKeytar) {
-    cachedKeytar = lazyRequire("keytar") as SecureStore;
+    // @github/keytar is the maintained fork of the original keytar package
+    // (archived March 2026). API is identical, so no other code changes needed.
+    cachedKeytar = lazyRequire("@github/keytar") as SecureStore;
   }
   return cachedKeytar;
 }
@@ -56,6 +58,9 @@ interface MicrosoftGraphAuthDependencies {
   keychain?: SecureStore;
   fallbackStore?: SecureStore;
   pca?: PublicClientApplication;
+  confidentialClientFactory?: (
+    config: AuthConfig,
+  ) => Pick<ConfidentialClientApplication, "acquireTokenByClientCredential">;
 }
 
 class FileFallbackStore implements SecureStore {
@@ -251,6 +256,9 @@ export class MicrosoftGraphAuth {
   private config: AuthConfig;
   private keychain: SecureStore;
   private fallbackStore: SecureStore;
+  private confidentialClientFactory: (
+    config: AuthConfig,
+  ) => Pick<ConfidentialClientApplication, "acquireTokenByClientCredential">;
   private readonly serviceKeyName = "mcp-onedrive-sharepoint";
   private readonly accessTokenCacheAccount = "access_token";
   private readonly msalCacheAccount = "msal_token_cache";
@@ -269,6 +277,16 @@ export class MicrosoftGraphAuth {
 
     this.keychain = dependencies.keychain ?? getDefaultKeychain();
     this.fallbackStore = dependencies.fallbackStore ?? new FileFallbackStore();
+    this.confidentialClientFactory =
+      dependencies.confidentialClientFactory ??
+      ((cfg) =>
+        new ConfidentialClientApplication({
+          auth: {
+            clientId: cfg.clientId,
+            authority: `https://login.microsoftonline.com/${cfg.tenantId}`,
+            clientSecret: cfg.clientSecret,
+          },
+        }));
     this.pca =
       dependencies.pca ??
       new PublicClientApplication({
@@ -373,13 +391,7 @@ export class MicrosoftGraphAuth {
       return this.inMemoryToken.accessToken;
     }
 
-    const cca = new ConfidentialClientApplication({
-      auth: {
-        clientId: this.config.clientId,
-        authority: `https://login.microsoftonline.com/${this.config.tenantId}`,
-        clientSecret: this.config.clientSecret,
-      },
-    });
+    const cca = this.confidentialClientFactory(this.config);
 
     const request: ClientCredentialRequest = {
       scopes: ["https://graph.microsoft.com/.default"],
@@ -483,6 +495,14 @@ export class MicrosoftGraphAuth {
     } catch (error) {
       console.error("Error during sign out:", error);
     }
+  }
+
+  /**
+   * Returns the active auth mode. "client_credentials" when a clientSecret is
+   * configured (app identity, no user), otherwise "device_code".
+   */
+  getAuthMode(): "client_credentials" | "device_code" {
+    return this.config.clientSecret ? "client_credentials" : "device_code";
   }
 
   /**
