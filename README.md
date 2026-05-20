@@ -7,6 +7,8 @@
 
 MCP server for Microsoft Graph focused on OneDrive, SharePoint and related document workflows. Device-code or client-credentials auth, 33 tools, also usable as a standalone `ods` CLI for shell scripting.
 
+📖 **Long-form usage guide:** see [`docs/USAGE.md`](docs/USAGE.md) for the full tool reference, Azure app-registration cookbook, MCP-client wiring snippets, and common workflows.
+
 Onboarding commands on a clean clone:
 
 - `npm run build`
