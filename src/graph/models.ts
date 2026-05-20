@@ -145,7 +145,7 @@ export interface Site {
   siteCollection?: {
     hostname: string;
   };
-  root?: {};
+  root?: Record<string, never>;
   sharepointIds?: {
     siteId: string;
     siteUrl: string;

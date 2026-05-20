@@ -1,9 +1,9 @@
 # MCP OneDrive/SharePoint Server
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Node.js](https://img.shields.io/badge/node-%E2%89%A518-brightgreen.svg)](https://nodejs.org)
+[![Node.js](https://img.shields.io/badge/node-%E2%89%A520-brightgreen.svg)](https://nodejs.org)
 [![MCP](https://img.shields.io/badge/MCP-compatible-8A2BE2.svg)](https://modelcontextprotocol.io)
-[![TypeScript](https://img.shields.io/badge/typescript-%5E5.3-3178c6.svg)](https://www.typescriptlang.org)
+[![TypeScript](https://img.shields.io/badge/typescript-%5E5.9-3178c6.svg)](https://www.typescriptlang.org)
 
 MCP server for Microsoft Graph focused on OneDrive, SharePoint and related document workflows. Device-code or client-credentials auth, 33 tools, also usable as a standalone `ods` CLI for shell scripting.
 
@@ -38,12 +38,26 @@ This version includes real structural improvements instead of documentation-only
   - resolving OneDrive/SharePoint resources by `driveId`, `siteId`, `itemId` and path
 - updated key listing/search flows to return pagination metadata and support `driveId`
 
+## v1.1 (this fork)
+
+This fork ships correctness fixes for the auth and file-operation paths plus a full dependency refresh:
+
+- **Client-credentials mode now works on a fresh process.** Previously, `bootstrap()` always required a cached delegated user, so any process started with only `MICROSOFT_GRAPH_CLIENT_SECRET` set immediately threw `Authentication required. Run npm run setup-auth`. The bootstrap check is now gated on the auth mode.
+- **`health_check` now reports the actual auth mode** (`device_code` vs `client_credentials`) and skips the `/me`-based probes when the server is running app-only — Graph rejects `/me` in app-only auth, so the old probe always reported "failed" in CC mode.
+- **`copy_item` now resolves the destination drive correctly.** The previous implementation assigned a `destinationSiteId` directly to `parentReference.driveId` (a site id is not a drive id), which made cross-site copies fail at Graph. Cross-site/cross-drive copies now work via `destinationDriveId`, `destinationSite`, `destinationSiteId`, or `destinationSiteUrl`, with destination folder paths resolved against the destination drive.
+- **`move_item` no longer silently succeeds** when a `parentFolderPath` lookup fails or when no fields are supplied — it returns an error instead of a misleading "Item moved/renamed successfully".
+- **Migrated `keytar` → `@github/keytar`.** The original `keytar` repo was archived by GitHub in March 2026. The fork is a drop-in replacement with the same API and is actively maintained.
+- **Upgraded `@azure/msal-node` 2.x → 5.x** (bumps the minimum Node version to 20).
+- **Migrated to ESLint 9 + typescript-eslint 8** (flat config), which clears 6 high-severity `minimatch` ReDoS advisories that came in via the old `@typescript-eslint/*` 6.x dependency chain.
+- **Removed dead `form-data` dependency** (imported but never referenced in the codebase).
+- Bumped `dotenv` (16 → 17), `mime-types` (2 → 3), and `@types/node` (20 → 22).
+
 ## Requirements
 
-- Node.js 18+
+- **Node.js 20 or later** (required by `@azure/msal-node` v5 — Node 16 and 18 are no longer supported upstream)
 - A Microsoft Entra ID / Azure AD app registration. Two auth modes are supported:
   - **Device-code (default):** Public client registration with Delegated permissions (`Files.ReadWrite.All`, `Sites.ReadWrite.All`, `User.Read`, `offline_access`). No client secret needed.
-  - **Client credentials:** Confidential client registration with Application permissions (`Files.ReadWrite.All`, `Sites.ReadWrite.All`). Requires `MICROSOFT_GRAPH_CLIENT_SECRET` / `SP_CLIENT_SECRET` in env and admin consent in Azure AD. `MICROSOFT_GRAPH_TENANT_ID` must be a specific tenant UUID — `common` does not work with this flow.
+  - **Client credentials:** Confidential client registration with Application permissions (`Files.ReadWrite.All`, `Sites.ReadWrite.All`). Requires `MICROSOFT_GRAPH_CLIENT_SECRET` / `SP_CLIENT_SECRET` in env and admin consent in Azure AD. `MICROSOFT_GRAPH_TENANT_ID` must be a specific tenant UUID — `common` does not work with this flow. **`npm run setup-auth` is not needed in this mode** — tokens are acquired on demand at first use.
 
 ## Installation
 
@@ -149,6 +163,8 @@ MICROSOFT_GRAPH_CLIENT_SECRET=your_client_secret
 ```
 
 The app registration in Azure AD must use **Application** permissions (not Delegated) with admin consent granted.
+
+In client-credentials mode, the server does **not** require a prior `npm run setup-auth` run — it acquires its token on the first tool call and reuses it from memory until expiry. The `health_check` tool reports `authMode: "client_credentials"` and skips the `/me`-based probes (which are only valid for delegated auth).
 
 ### Device code (interactive, default fallback)
 
@@ -300,7 +316,7 @@ Use the wrapper as the MCP command so the repo-local `.env` is loaded automatica
 - `invalid_grant` / `AADSTS` on first run: token store is empty or expired. Run `npm run setup-auth` again.
 - `403 Forbidden` on SharePoint lists/drives: the signed-in user lacks permission to the target site. Check with the site owner.
 - `404` on a `driveId` or `siteId`: the identifier is stale or the resource was deleted. Use `list_drives` / `discover_sites` to re-discover.
-- Build fails on a clean clone: make sure Node.js is 18+ and run `npm install` before `npm run build`.
+- Build fails on a clean clone: make sure Node.js is 20+ and run `npm install` before `npm run build`.
 - `AADSTS700016` or `401` with client credentials: ensure `MICROSOFT_GRAPH_TENANT_ID` is a specific tenant UUID (not `common`) and that Application permissions have admin consent in Azure AD.
 - `AADSTS7000215` (invalid client secret): the secret has expired or was deleted in Azure AD. Rotate it in the app registration and update `MICROSOFT_GRAPH_CLIENT_SECRET`.
 - Silent token refresh failed / device-code prompt in automated run: token cache in Keychain is stale. Either set `MICROSOFT_GRAPH_CLIENT_SECRET` to switch to client-credentials mode (no expiry), or clear the Keychain entries above and re-run `npm run setup-auth`.

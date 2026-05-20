@@ -89,7 +89,7 @@ class McpOneDriveSharePointServer {
     ];
   }
 
-  private getAllHandlers(): Record<string, Function> {
+  private getAllHandlers(): Record<string, (args: any) => Promise<any>> {
     return {
       ...fileHandlers,
       ...sharepointHandlers,
