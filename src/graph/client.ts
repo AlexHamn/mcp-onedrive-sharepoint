@@ -15,8 +15,6 @@ import {
   driveCache,
 } from "../utils/cache-manager.js";
 import { SecurityValidator, AuditLogger } from "../utils/security-validator.js";
-import * as FormData from "form-data";
-import { createReadStream } from "fs";
 import { lookup } from "mime-types";
 
 export interface RequestOptions {
