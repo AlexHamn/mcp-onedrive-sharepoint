@@ -24,6 +24,10 @@ import {
   resolveRequiredSharePointSite,
   resolveSharePointSiteReference,
 } from "../../sharepoint/site-resolver.js";
+import {
+  siteProvisioningTools,
+  siteProvisioningHandlers,
+} from "./site-provisioning.js";
 
 // Tool 1: Discover SharePoint sites
 export const discoverSites: Tool = {
@@ -849,6 +853,7 @@ export const sharepointTools = [
   createListItem,
   updateListItem,
   deleteListItem,
+  ...siteProvisioningTools,
 ];
 
 export const sharepointHandlers = {
@@ -861,4 +866,16 @@ export const sharepointHandlers = {
   create_list_item: handleCreateListItem,
   update_list_item: handleUpdateListItem,
   delete_list_item: handleDeleteListItem,
+  ...siteProvisioningHandlers,
 };
+
+export {
+  createCommunicationSite,
+  createTeamSiteClassic,
+  createTeamSite,
+  getSiteCreationStatus,
+  handleCreateCommunicationSite,
+  handleCreateTeamSiteClassic,
+  handleCreateTeamSite,
+  handleGetSiteCreationStatus,
+} from "./site-provisioning.js";

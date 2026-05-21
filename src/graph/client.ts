@@ -8,6 +8,8 @@ import { getAuthInstance } from "../auth/microsoft-graph-auth.js";
 import { GraphApiError, RetryHelper } from "./error-handler.js";
 import { GRAPH_BASE_URL, buildUrl } from "../config/endpoints.js";
 import { GraphResponse, WorkbookSession, McpResponse } from "./models.js";
+
+export type GraphApiVersion = "v1.0" | "beta";
 import { assertGraphPayloadHasNoError } from "./contracts.js";
 import {
   metadataCache,
@@ -22,6 +24,13 @@ export interface RequestOptions {
   retries?: number;
   headers?: Record<string, string>;
   validateStatus?: (status: number) => boolean;
+  /**
+   * Selects the Graph API version for this request. Defaults to "v1.0". Use
+   * "beta" only when an endpoint is not yet available on v1.0 (e.g. site
+   * provisioning via `POST /sites`). Beta endpoints are not supported for
+   * production use by Microsoft; the caller is responsible for that judgment.
+   */
+  apiVersion?: GraphApiVersion;
 }
 
 export interface UploadOptions extends RequestOptions {
@@ -123,6 +132,23 @@ export class GraphClient {
 
   // Core HTTP methods with retry logic and caching
 
+  /**
+   * Build the request URL for a Graph call. For v1.0 we return a path; the
+   * shared axios instance prepends GRAPH_BASE_URL. For beta we return the
+   * absolute URL — axios uses absolute URLs verbatim and ignores baseURL,
+   * which lets us hit /beta without a second axios instance.
+   */
+  private resolveRequestUrl(
+    endpoint: string,
+    params: Record<string, any> | undefined,
+    apiVersion: GraphApiVersion | undefined,
+  ): string {
+    if (apiVersion === "beta") {
+      return buildUrl(endpoint, params ?? {}, "beta");
+    }
+    return buildUrl(endpoint, params ?? {}, false);
+  }
+
   async get<T>(
     endpoint: string,
     params?: Record<string, any>,
@@ -137,7 +163,7 @@ export class GraphClient {
     }
 
     // Check cache for metadata requests
-    const cacheKey = this.generateCacheKey(endpoint, params);
+    const cacheKey = this.generateCacheKey(endpoint, params, options.apiVersion);
     if (this.isCacheableRequest(endpoint)) {
       const cached = metadataCache.get(cacheKey);
       if (cached) {
@@ -147,7 +173,7 @@ export class GraphClient {
 
     return this.executeWithRetry(
       async () => {
-        const url = buildUrl(endpoint, params, false);
+        const url = this.resolveRequestUrl(endpoint, params, options.apiVersion);
         const response = await this.axios.get<T>(url, {
           timeout: options.timeout,
           headers: options.headers,
@@ -163,7 +189,7 @@ export class GraphClient {
           metadataCache.set(cacheKey, responseData);
         }
 
-        return this.wrapResponse(responseData, "onedrive");
+        return this.wrapResponse(responseData, "onedrive", response);
       },
       `GET ${endpoint}`,
       options.retries,
@@ -177,14 +203,14 @@ export class GraphClient {
   ): Promise<McpResponse<T>> {
     return this.executeWithRetry(
       async () => {
-        const url = buildUrl(endpoint, {}, false);
+        const url = this.resolveRequestUrl(endpoint, undefined, options.apiVersion);
         const response = await this.axios.post<T>(url, data, {
           timeout: options.timeout,
           headers: options.headers,
           validateStatus: options.validateStatus,
         });
 
-        return this.wrapResponse(response.data, "onedrive");
+        return this.wrapResponse(response.data, "onedrive", response);
       },
       `POST ${endpoint}`,
       options.retries,
@@ -198,14 +224,14 @@ export class GraphClient {
   ): Promise<McpResponse<T>> {
     return this.executeWithRetry(
       async () => {
-        const url = buildUrl(endpoint, {}, false);
+        const url = this.resolveRequestUrl(endpoint, undefined, options.apiVersion);
         const response = await this.axios.put<T>(url, data, {
           timeout: options.timeout,
           headers: options.headers,
           validateStatus: options.validateStatus,
         });
 
-        return this.wrapResponse(response.data, "onedrive");
+        return this.wrapResponse(response.data, "onedrive", response);
       },
       `PUT ${endpoint}`,
       options.retries,
@@ -219,14 +245,14 @@ export class GraphClient {
   ): Promise<McpResponse<T>> {
     return this.executeWithRetry(
       async () => {
-        const url = buildUrl(endpoint, {}, false);
+        const url = this.resolveRequestUrl(endpoint, undefined, options.apiVersion);
         const response = await this.axios.patch<T>(url, data, {
           timeout: options.timeout,
           headers: options.headers,
           validateStatus: options.validateStatus,
         });
 
-        return this.wrapResponse(response.data, "onedrive");
+        return this.wrapResponse(response.data, "onedrive", response);
       },
       `PATCH ${endpoint}`,
       options.retries,
@@ -239,14 +265,14 @@ export class GraphClient {
   ): Promise<McpResponse<T>> {
     return this.executeWithRetry(
       async () => {
-        const url = buildUrl(endpoint, {}, false);
+        const url = this.resolveRequestUrl(endpoint, undefined, options.apiVersion);
         const response = await this.axios.delete<T>(url, {
           timeout: options.timeout,
           headers: options.headers,
           validateStatus: options.validateStatus,
         });
 
-        return this.wrapResponse(response.data, "onedrive");
+        return this.wrapResponse(response.data, "onedrive", response);
       },
       `DELETE ${endpoint}`,
       options.retries,
@@ -599,25 +625,45 @@ export class GraphClient {
   private wrapResponse<T>(
     data: T,
     source: "onedrive" | "sharepoint" | "excel" = "onedrive",
+    axiosResponse?: AxiosResponse,
   ): McpResponse<T> {
     const validatedData = assertGraphPayloadHasNoError(data);
+
+    const metadata: NonNullable<McpResponse<T>["metadata"]> = {
+      timestamp: new Date().toISOString(),
+      source,
+    };
+
+    if (axiosResponse) {
+      metadata.status = axiosResponse.status;
+      // axios returns header values as string | string[] | undefined. Flatten
+      // to a plain Record<string, string> so consumers can read headers
+      // (e.g. Location) without knowing axios internals.
+      const flatHeaders: Record<string, string> = {};
+      for (const [key, value] of Object.entries(axiosResponse.headers ?? {})) {
+        if (value == null) continue;
+        flatHeaders[key.toLowerCase()] = Array.isArray(value)
+          ? value.join(", ")
+          : String(value);
+      }
+      metadata.headers = flatHeaders;
+    }
 
     return {
       success: true,
       data: validatedData,
-      metadata: {
-        timestamp: new Date().toISOString(),
-        source,
-      },
+      metadata,
     };
   }
 
   private generateCacheKey(
     endpoint: string,
     params?: Record<string, any>,
+    apiVersion?: GraphApiVersion,
   ): string {
     const paramStr = params ? JSON.stringify(params) : "";
-    return `${endpoint}:${paramStr}`;
+    const versionPrefix = apiVersion === "beta" ? "beta:" : "";
+    return `${versionPrefix}${endpoint}:${paramStr}`;
   }
 
   private isCacheableRequest(endpoint: string): boolean {

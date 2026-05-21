@@ -1,6 +1,6 @@
 # Usage Guide
 
-This document is the long-form companion to [README.md](../README.md). It walks through everything you need to go from a fresh clone to running tools against a real Microsoft 365 tenant, then documents every one of the 33 MCP tools with example inputs and expected outputs.
+This document is the long-form companion to [README.md](../README.md). It walks through everything you need to go from a fresh clone to running tools against a real Microsoft 365 tenant, then documents every one of the 37 MCP tools with example inputs and expected outputs.
 
 If you just want to wire the server into an MCP client and call something, jump to [Quick start](#quick-start). For tool-by-tool reference, jump to [Tool reference](#tool-reference).
 
@@ -28,7 +28,7 @@ If you just want to wire the server into an MCP client and call something, jump 
 - [Error envelope](#error-envelope)
 - [Tool reference](#tool-reference)
   - [Files](#files-10-tools)
-  - [SharePoint](#sharepoint-9-tools)
+  - [SharePoint](#sharepoint-13-tools)
   - [Utilities](#utilities-5-tools)
   - [Advanced](#advanced-9-tools)
 - [Common workflows](#common-workflows)
@@ -44,7 +44,7 @@ If you just want to wire the server into an MCP client and call something, jump 
 │ MCP client             │ ◀─────────────────▶ │ This server (`mcp-       │
 │ (Claude Code / Desktop,│   JSON-RPC frames   │  onedrive-sharepoint`)   │
 │  Cursor, mcporter, …)  │                     │                          │
-└────────────────────────┘                     │  • 33 tools across       │
+└────────────────────────┘                     │  • 37 tools across       │
                                                │    files / SP / utils /  │
                                                │    advanced              │
                                                │  • Auth (MSAL): device-  │
@@ -94,9 +94,12 @@ Use this when the server acts on behalf of a specific user — files appear as i
 4. Under **API permissions → Add a permission → Microsoft Graph → Delegated permissions**, add:
    - `Files.ReadWrite.All`
    - `Sites.ReadWrite.All`
+   - `Sites.Create.All` *(for `create_communication_site` / `create_team_site_classic`)*
+   - `Group.ReadWrite.All` *(for `create_team_site`)*
    - `User.Read`
+   - `User.Read.All` *(to resolve owner UPNs to group-owner ids)*
    - `offline_access` (required for silent refresh)
-5. **Grant admin consent** for the tenant if your IT policy requires it (recommended).
+5. **Grant admin consent** for the tenant if your IT policy requires it (recommended). The site-creation scopes (`Sites.Create.All`, `Group.ReadWrite.All`, `User.Read.All`) are admin-consent-only.
 6. Copy the **Application (client) ID** and **Directory (tenant) ID** from the Overview page.
 
 Then in your `.env`:
@@ -115,6 +118,9 @@ Use this when the server runs unattended (automation, schedulers, multi-user sha
 3. Under **API permissions → Add a permission → Microsoft Graph → Application permissions**, add:
    - `Files.ReadWrite.All`
    - `Sites.ReadWrite.All`
+   - `Sites.Create.All` *(for `create_communication_site` / `create_team_site_classic`)*
+   - `Group.Create` or `Group.ReadWrite.All` *(for `create_team_site`)*
+   - `User.Read.All` *(to resolve owner UPNs to group-owner ids)*
 4. **Grant admin consent.** Application permissions don't work until consented.
 
 Then in your `.env`:
@@ -160,7 +166,7 @@ If `health_check` returns `"status": "healthy"`, you're done. Wire the server in
 | `MICROSOFT_GRAPH_CLIENT_ID` | yes | — | Azure app registration's Application (client) ID. |
 | `MICROSOFT_GRAPH_TENANT_ID` | yes | `common` | Tenant UUID. `common` only works in device-code mode. |
 | `MICROSOFT_GRAPH_CLIENT_SECRET` | CC mode only | — | Activates client-credentials. Alias: `SP_CLIENT_SECRET`. |
-| `MICROSOFT_GRAPH_SCOPES` | no | `Files.ReadWrite.All,Sites.ReadWrite.All,Directory.Read.All,User.Read,offline_access` | Comma-separated scope list. Applies to device-code only; CC mode requests `https://graph.microsoft.com/.default`. |
+| `MICROSOFT_GRAPH_SCOPES` | no | `Files.ReadWrite.All,Sites.ReadWrite.All,Sites.Create.All,Group.ReadWrite.All,User.Read,User.Read.All,offline_access` | Comma-separated scope list. Applies to device-code only; CC mode requests `https://graph.microsoft.com/.default`. |
 | `MICROSOFT_GRAPH_BASE_URL` | no | `https://graph.microsoft.com/v1.0` | Override for sovereign clouds (US Gov, 21Vianet, etc.). |
 | `MICROSOFT_GRAPH_TIMEOUT` | no | `30000` | HTTP timeout in ms. |
 | `MICROSOFT_GRAPH_MAX_RETRIES` | no | `3` | Retries for transient (429/5xx/network) failures. |
@@ -217,7 +223,7 @@ Add to `~/.config/claude-code/mcp.json` (or your project's `.claude/mcp.json`):
   }
 }
 ```
-Then restart Claude Code; the 33 tools appear under the `sharepoint` namespace.
+Then restart Claude Code; the 37 tools appear under the `sharepoint` namespace.
 
 ### Claude Desktop
 
@@ -470,7 +476,7 @@ Cross-drive / cross-site copy (the v1.1 fix):
 
 ---
 
-### SharePoint (9 tools)
+### SharePoint (13 tools)
 
 #### `discover_sites`
 ```json
@@ -532,6 +538,55 @@ Hidden / `_`-prefixed system lists are filtered client-side by default.
 #### `delete_list_item`
 ```json
 { "site": "primary", "listId": "9c...", "itemId": "42" }
+```
+
+#### `create_communication_site`
+Provision a new SharePoint Communication site via `POST /beta/sites` (template `sitepagepublishing`). The tool resolves the tenant SharePoint hostname automatically (from `config/sites.local.json` if any site is registered, otherwise from `/sites/root`), builds the target URL from `alias`, and polls the long-running operation until completion.
+
+```json
+{
+  "displayName": "Marketing 2026",
+  "alias": "marketing-2026",
+  "description": "Comunicaciones del equipo de marketing",
+  "locale": "es-MX",
+  "shareByEmailEnabled": false
+}
+```
+
+- `alias` is the URL leaf (lowercase letters/digits/hyphens); the full URL becomes `https://{tenant}.sharepoint.com/sites/{alias}`. Pass `webUrl` to override the entire URL.
+- `ownerEmail` is required in client-credentials (app-only) mode; in delegated mode it defaults to the caller.
+- `waitForCompletion: false` returns the `operationId` immediately so the caller can poll later with `get_site_creation_status`.
+- Beta-only endpoint — see the v1.1 fork notes for context.
+
+#### `create_team_site`
+Create a Microsoft-365-Group-backed team site via `POST /v1.0/groups`. The group is created synchronously; its SharePoint site is provisioned in the background and the tool polls `/groups/{id}/sites/root` until it appears.
+
+```json
+{
+  "displayName": "Equipo de Marketing",
+  "mailNickname": "equipo-marketing",
+  "description": "Sitio del equipo de marketing",
+  "visibility": "Private",
+  "ownerEmails": ["maria@example.com"],
+  "memberEmails": ["jose@example.com"],
+  "hideFromOutlook": true,
+  "welcomeEmailDisabled": true
+}
+```
+
+- `mailNickname` becomes the group's email alias and must be ≤64 chars, no leading/trailing dot.
+- `ownerEmails` is required in client-credentials mode; without it, Graph creates an orphaned group whose SharePoint site never provisions.
+- `provisionSiteOnDemand: true` defers SharePoint site creation until first access; the tool returns as soon as the group exists.
+- `waitForSite: false` returns immediately after group creation.
+
+#### `create_team_site_classic`
+Same shape as `create_communication_site` but uses the `sts` template — a modern team site **without** a backing M365 group. Use this only when you specifically want classic team-site semantics; otherwise prefer `create_team_site`.
+
+#### `get_site_creation_status`
+Poll an in-flight site creation operation by id. Returns `notStarted` / `running` / `succeeded` / `failed` plus `resourceLocation` once succeeded.
+
+```json
+{ "operationId": "JXMnaHR0cHMlM0E…" }
 ```
 
 ---

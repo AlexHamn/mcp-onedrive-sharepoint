@@ -534,5 +534,17 @@ export interface McpResponse<T> {
     truncated?: boolean;
     truncationReason?: "maxItems" | "maxPages";
     nextPageToken?: string;
+    /**
+     * HTTP status of the underlying Graph response. Only populated by the real
+     * client (axios path); mocks may omit this. Needed when callers care about
+     * 202-Accepted vs 200/201 (e.g. async site creation).
+     */
+    status?: number;
+    /**
+     * Subset of Graph response headers as a flat object. Only populated by the
+     * real client. Needed for the `Location` header returned by long-running
+     * operation endpoints like `POST /beta/sites`.
+     */
+    headers?: Record<string, string>;
   };
 }

@@ -72,6 +72,9 @@ function loadKnownSitesFromDisk(): KnownSharePointSite[] {
 }
 
 let KNOWN_SHAREPOINT_SITES: KnownSharePointSite[] = loadKnownSitesFromDisk();
+// Cached for the process lifetime — a tenant's SharePoint host never changes
+// during a session, so we resolve it lazily and remember the answer.
+let cachedTenantHostname: string | null = null;
 
 function normalizeAlias(value: string): string {
   return value
@@ -157,10 +160,12 @@ export function __setKnownSitesForTests(sites: KnownSharePointSite[]): void {
     ...site,
     aliases: [...site.aliases],
   }));
+  cachedTenantHostname = null;
 }
 
 export function __resetKnownSitesForTests(): void {
   KNOWN_SHAREPOINT_SITES = loadKnownSitesFromDisk();
+  cachedTenantHostname = null;
 }
 
 export async function resolveSharePointSiteReference(
@@ -228,6 +233,72 @@ export async function resolveRequiredSharePointSite(
   }
 
   return resolved;
+}
+
+/**
+ * Resolve the tenant's SharePoint hostname (e.g. `contoso.sharepoint.com`).
+ *
+ * Resolution order:
+ *   1. Any site already registered in `sites.local.json` — we extract the host
+ *      from `siteUrl`. No Graph call; works offline.
+ *   2. `GET /sites/root`, which returns the tenant root site. Result is cached
+ *      for the process lifetime since the tenant host never changes.
+ *
+ * Used by the site-creation tools to build the target `webUrl` from a short
+ * URL leaf (e.g. `marketing-2026` → `https://lanpro.sharepoint.com/sites/marketing-2026`).
+ */
+
+export function __setTenantHostnameForTests(hostname: string | null): void {
+  cachedTenantHostname = hostname;
+}
+
+export async function resolveTenantSharePointHostname(
+  client: {
+    get<T>(
+      endpoint: string,
+      params?: Record<string, string>,
+    ): Promise<{ success: boolean; data?: T }>;
+  },
+): Promise<string> {
+  if (cachedTenantHostname) return cachedTenantHostname;
+
+  // Cheap path: derive from any pre-registered site.
+  for (const site of KNOWN_SHAREPOINT_SITES) {
+    try {
+      const host = new URL(site.siteUrl).hostname;
+      if (host) {
+        cachedTenantHostname = host;
+        return host;
+      }
+    } catch {
+      // Skip malformed entries; fall through to Graph lookup.
+    }
+  }
+
+  // Fallback: ask Graph. `/sites/root` returns the tenant root site, whose
+  // webUrl is always `https://{tenant}.sharepoint.com`.
+  const response = await client.get<Site & { siteCollection?: { hostname?: string } }>(
+    "/sites/root",
+  );
+  const hostFromCollection = response.data?.siteCollection?.hostname;
+  if (hostFromCollection) {
+    cachedTenantHostname = hostFromCollection;
+    return hostFromCollection;
+  }
+  const webUrl = response.data?.webUrl;
+  if (webUrl) {
+    try {
+      const host = new URL(webUrl).hostname;
+      cachedTenantHostname = host;
+      return host;
+    } catch {
+      // fall through
+    }
+  }
+
+  throw new Error(
+    "Unable to determine tenant SharePoint hostname. Register at least one site in config/sites.local.json or ensure /sites/root is reachable.",
+  );
 }
 
 export async function resolveDriveTargetContext(

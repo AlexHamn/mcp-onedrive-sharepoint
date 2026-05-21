@@ -4,7 +4,7 @@ Context for Claude Code sessions working in this repo. Read this first; for the 
 
 ## What this is
 
-A fork of [`ftaricano/mcp-onedrive-sharepoint`](https://github.com/ftaricano/mcp-onedrive-sharepoint), patched and dependency-refreshed (v1.1). Exposes 33 MCP tools that drive Microsoft Graph for OneDrive / SharePoint operations. This fork is configured for an internal Lanpro Microsoft 365 tenant — operator identity, tenant ID, and registered site aliases live in machine-local files (see [Local-only state](#local-only-state) below); none of that is committed.
+A fork of [`ftaricano/mcp-onedrive-sharepoint`](https://github.com/ftaricano/mcp-onedrive-sharepoint), patched and dependency-refreshed (v1.1). Exposes 37 MCP tools that drive Microsoft Graph for OneDrive / SharePoint operations. This fork is configured for an internal Lanpro Microsoft 365 tenant — operator identity, tenant ID, and registered site aliases live in machine-local files (see [Local-only state](#local-only-state) below); none of that is committed.
 
 The operator owns the tenant and has full admin rights (can grant admin consent, create app registrations, modify tenant-wide settings). Don't gate suggestions on "ask your IT admin"; if something needs an Azure portal click, walk them through it directly.
 
@@ -58,7 +58,7 @@ This repo is registered as the `sharepoint` MCP server at user scope in `~/.clau
 
 ```bash
 npm run build       # tsc, no emit on errors
-npm run test        # node --test, 106 tests pass on main
+npm run test        # node --test, 120 tests pass on main
 npm run lint        # eslint 9 flat config, --max-warnings 410
 npm run ci          # build + lint + test
 npm run setup-auth  # only when the MSAL refresh window has expired
@@ -78,7 +78,9 @@ npm run setup-auth  # only when the MSAL refresh window has expired
 | Graph HTTP client (retries, chunked upload, `$batch`, caching) | `src/graph/client.ts` |
 | Endpoint builders + OData escaping | `src/graph/resource-resolver.ts` |
 | Site-registry + alias resolution | `src/sharepoint/site-resolver.ts` |
-| Tools (33 total) | `src/tools/{files,sharepoint,utils,advanced}/*.ts` |
+| Tools (37 total) | `src/tools/{files,sharepoint,utils,advanced}/*.ts` |
+| Site provisioning tools (beta API) | `src/tools/sharepoint/site-provisioning.ts` |
+| Polling helper for long-running ops | `src/graph/polling.ts` |
 | Tests (helpers, fixtures) | `src/tests/`, `src/tests/helpers/` |
 | Long-form tool reference | `docs/USAGE.md` |
 | Wrapper / spcall docs | `docs/operations.md` |
@@ -104,8 +106,10 @@ This fork ships fixes the upstream doesn't yet:
 - `health_check` reports real auth mode and skips `/me` probes when running app-only.
 - `keytar` (archived March 2026) → `@github/keytar`. `@azure/msal-node` 2.x → 5.x (Node ≥ 20).
 - ESLint 8 → 9 flat config; clears 6 high-severity `minimatch` ReDoS advisories from the `@typescript-eslint` 6.x chain.
+- **Site provisioning tools** (`create_communication_site`, `create_team_site`, `create_team_site_classic`, `get_site_creation_status`). `POST /sites` is Graph beta-only as of 2026-05; the GraphClient gained an `apiVersion: "beta"` request option so v1.0 stays the default everywhere else.
+- New delegated scopes in `BUSINESS`: `Sites.Create.All`, `Group.ReadWrite.All`, `User.Read.All`. Existing cached tokens lack these scopes, so the first call after upgrade will fall through to device-code re-consent. Walk the operator through the new consent screen on initial use.
 
-See `git log --oneline` for the four-commit landing on `main`.
+See `git log --oneline` for the commit history on `main`.
 
 ---
 

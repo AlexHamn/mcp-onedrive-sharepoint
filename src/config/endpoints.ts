@@ -74,11 +74,18 @@ export const ENDPOINTS = {
   },
 } as const;
 
-// Helper function to build URLs with path parameters and OData query parameters.
+/**
+ * `useBase` controls the absolute-URL prefix.
+ *   `true`     → prepend the v1.0 base URL (legacy default; preserved).
+ *   `false`    → return the path only (caller — usually axios — supplies the base).
+ *   `"v1.0"`   → explicit v1.0 prefix (same as `true`, just self-documenting).
+ *   `"beta"`   → prepend the beta base URL. Required for endpoints that exist
+ *                only on /beta (e.g. POST /sites for site creation).
+ */
 export function buildUrl(
   endpoint: string,
   params: Record<string, string> = {},
-  useBase = true,
+  useBase: boolean | "v1.0" | "beta" = true,
 ): string {
   let url = endpoint;
   const queryParams = new URLSearchParams();
@@ -103,9 +110,9 @@ export function buildUrl(
     url += `${url.includes("?") ? "&" : "?"}${queryParams.toString()}`;
   }
 
-  // Add base URL if needed
   if (useBase && !url.startsWith("http")) {
-    url = GRAPH_BASE_URL + url;
+    const base = useBase === "beta" ? GRAPH_BETA_URL : GRAPH_BASE_URL;
+    url = base + url;
   }
 
   return url;
