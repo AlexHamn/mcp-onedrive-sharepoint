@@ -65,9 +65,9 @@ test("health_check handler returns centralized MCP contract on success", async (
       data: {
         user: {
           id: "user-1",
-          displayName: "Jarvis",
-          mail: "jarvis@example.com",
-          userPrincipalName: "jarvis@example.com",
+          displayName: "Alice Example",
+          mail: "alice@example.com",
+          userPrincipalName: "alice@example.com",
         },
       },
     }),

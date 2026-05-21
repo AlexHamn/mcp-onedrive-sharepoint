@@ -21,7 +21,7 @@ test("coerce parses integers and floats", () => {
 });
 
 test("coerce leaves non-numeric strings untouched", () => {
-  assert.equal(coerce("financeiro"), "financeiro");
+  assert.equal(coerce("primary"), "primary");
   assert.equal(coerce("/Shared Documents"), "/Shared Documents");
   assert.equal(coerce(""), "");
 });
@@ -31,13 +31,13 @@ test("coerce does not treat version-like strings as numbers", () => {
 });
 
 test("parseArgs supports --key=value", () => {
-  const result = parseArgs(["--site=financeiro", "--path=/x"]);
-  assert.deepEqual(result, { site: "financeiro", path: "/x" });
+  const result = parseArgs(["--site=primary", "--path=/x"]);
+  assert.deepEqual(result, { site: "primary", path: "/x" });
 });
 
 test("parseArgs supports --key value", () => {
-  const result = parseArgs(["--site", "financeiro", "--limit", "50"]);
-  assert.deepEqual(result, { site: "financeiro", limit: 50 });
+  const result = parseArgs(["--site", "primary", "--limit", "50"]);
+  assert.deepEqual(result, { site: "primary", limit: 50 });
 });
 
 test("parseArgs treats trailing bare flag as true", () => {
@@ -51,8 +51,8 @@ test("parseArgs treats flag followed by flag as boolean true", () => {
 });
 
 test("parseArgs ignores non-flag tokens", () => {
-  const result = parseArgs(["positional", "--site", "financeiro"]);
-  assert.deepEqual(result, { site: "financeiro" });
+  const result = parseArgs(["positional", "--site", "primary"]);
+  assert.deepEqual(result, { site: "primary" });
 });
 
 test("parseArgs handles empty argv", () => {
@@ -60,7 +60,7 @@ test("parseArgs handles empty argv", () => {
 });
 
 test("buildArgs returns parsed as-is when no --json given", () => {
-  const parsed = { site: "financeiro", limit: 50 };
+  const parsed = { site: "primary", limit: 50 };
   assert.deepEqual(buildArgs(parsed), parsed);
 });
 

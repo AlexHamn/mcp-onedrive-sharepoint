@@ -62,7 +62,7 @@ export const listFiles: Tool = {
       site: {
         type: "string",
         description:
-          'Known SharePoint site alias or canonical URL (e.g., "financeiro", "socios2")',
+          'Known SharePoint site alias or canonical URL (e.g., "primary", "team-docs")',
       },
       siteUrl: {
         type: "string",

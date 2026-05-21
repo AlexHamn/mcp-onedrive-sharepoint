@@ -34,9 +34,9 @@ test("discover_sites uses Graph site search endpoint for explicit searches", asy
           value: [
             {
               id: "site-1",
-              displayName: "Financeiro Área",
-              name: "Financeiro Área",
-              webUrl: "https://contoso.sharepoint.com/sites/financeiro",
+              displayName: "Primary Workspace",
+              name: "Primary Workspace",
+              webUrl: "https://contoso.sharepoint.com/sites/primary",
             },
           ],
         },
@@ -46,20 +46,22 @@ test("discover_sites uses Graph site search endpoint for explicit searches", asy
 
   __setGraphClientInstanceForTests(mock.client as any);
 
+  // Preserve a non-ASCII character in the search term so the test continues
+  // to exercise the UTF-8 URL-encoding code path (é → %C3%A9).
   const response = (await handleDiscoverSites({
-    search: "  Financeiro   Área  ",
+    search: "  Café   Records  ",
     includePersonalSite: true,
     limit: 5,
   })) as ToolEnvelope;
   const payload = parsePayload(response);
 
   assert.equal(response.isError, undefined);
-  assert.equal(payload.search, "Financeiro Área");
+  assert.equal(payload.search, "Café Records");
   assert.equal(payload.siteCount, 2);
   assert.equal(payload.sites[0].id, "root-site");
   assert.equal(
     mock.methodCalls("get")[0]?.args[0],
-    "/sites?search=Financeiro%20%C3%81rea",
+    "/sites?search=Caf%C3%A9%20Records",
   );
   assert.deepEqual(mock.methodCalls("get")[0]?.args[1], { $top: "5" });
 });
