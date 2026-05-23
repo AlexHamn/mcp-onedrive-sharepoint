@@ -28,6 +28,7 @@ import {
   siteProvisioningTools,
   siteProvisioningHandlers,
 } from "./site-provisioning.js";
+import { pageTools, pageHandlers } from "./pages.js";
 
 // Tool 1: Discover SharePoint sites
 export const discoverSites: Tool = {
@@ -854,6 +855,7 @@ export const sharepointTools = [
   updateListItem,
   deleteListItem,
   ...siteProvisioningTools,
+  ...pageTools,
 ];
 
 export const sharepointHandlers = {
@@ -867,6 +869,7 @@ export const sharepointHandlers = {
   update_list_item: handleUpdateListItem,
   delete_list_item: handleDeleteListItem,
   ...siteProvisioningHandlers,
+  ...pageHandlers,
 };
 
 export {
@@ -879,3 +882,19 @@ export {
   handleCreateTeamSite,
   handleGetSiteCreationStatus,
 } from "./site-provisioning.js";
+
+export {
+  listSitePages,
+  getSitePage,
+  createSitePage,
+  updateSitePage,
+  publishSitePage,
+  deleteSitePage,
+  handleListSitePages,
+  handleGetSitePage,
+  handleCreateSitePage,
+  handleUpdateSitePage,
+  handlePublishSitePage,
+  handleDeleteSitePage,
+  SUPPORTED_STANDARD_WEB_PARTS,
+} from "./pages.js";
