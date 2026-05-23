@@ -45,16 +45,12 @@ export function sanitizeFileName(name: string): string {
     "LPT9",
   ];
 
+  // SharePoint accepts spaces in filenames; preserve them so local↔remote names round-trip.
   let sanitized = name
-    // Replace invalid characters with underscores
     .replace(invalidChars, "_")
-    // Replace multiple spaces with single space
     .replace(/\s+/g, " ")
-    // Remove leading/trailing spaces and dots
     .trim()
-    .replace(/^\.+|\.+$/g, "")
-    // Replace spaces with underscores for better compatibility
-    .replace(/\s/g, "_");
+    .replace(/^\.+|\.+$/g, "");
 
   // Check for reserved names
   const nameWithoutExt = sanitized.split(".")[0].toUpperCase();
