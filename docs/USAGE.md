@@ -476,7 +476,7 @@ Cross-drive / cross-site copy (the v1.1 fix):
 
 ---
 
-### SharePoint (13 tools)
+### SharePoint (19 tools)
 
 #### `discover_sites`
 ```json
@@ -588,6 +588,215 @@ Poll an in-flight site creation operation by id. Returns `notStarted` / `running
 ```json
 { "operationId": "JXMnaHR0cHMlM0E…" }
 ```
+
+#### `list_site_pages`
+List modern Site Pages on a site (the `Site Pages` library). All v1.0, no beta.
+
+```json
+{ "site": "primary", "orderBy": "lastModifiedDateTime desc", "limit": 50 }
+```
+
+`filter` accepts an OData expression (e.g. `"promotionKind eq 'newsPost'"`). The endpoint includes the `/microsoft.graph.sitePage` type-cast automatically — without it Graph returns the abstract `baseSitePage` and the sitePage-only fields disappear.
+
+#### `get_site_page`
+Fetch a page by id. Set `expandCanvas: true` to include the full `canvasLayout` (sections + columns + web parts).
+
+```json
+{ "site": "primary", "pageId": "094ea58f-...", "expandCanvas": true }
+```
+
+If `$expand=canvasLayout` returns a 5xx (a known intermittent Graph bug — see [sp-dev-docs#9465](https://github.com/SharePoint/sp-dev-docs/issues/9465)), the tool transparently falls back to a no-expand fetch and sets `canvasFallback: true` so the caller knows page metadata is back but canvas isn't.
+
+#### `create_site_page`
+Create a modern Site Page. By default it lands as a draft (`publishingState.level: "checkout"`); set `publish: true` to also publish in one call.
+
+```json
+{
+  "site": "primary",
+  "name": "Bienvenida",
+  "title": "Bienvenida",
+  "pageLayout": "article",
+  "titleArea": { "layout": "plain", "title": "Bienvenida", "showAuthor": false },
+  "canvasLayout": {
+    "horizontalSections": [{
+      "layout": "oneColumn",
+      "columns": [{ "width": 12, "webparts": [
+        { "@odata.type": "#microsoft.graph.textWebPart", "innerHtml": "<p>Hola.</p>" }
+      ]}]
+    }]
+  },
+  "publish": true
+}
+```
+
+- `name` — `.aspx` is appended automatically if missing. Must be unique in the Site Pages library.
+- `pageLayout` — `article` (default, content pages) or `home`. Cannot be changed after creation.
+- `promotionKind` — `page` (default) or `newsPost`. News posts show up in news rollups and the SharePoint mobile feed. Demotion (newsPost → page) is **not** supported by Graph.
+- Web part shorthand: `{ "type": "text", "innerHtml": "..." }` expands to `#microsoft.graph.textWebPart`. See [Building site pages with web parts](#building-site-pages-with-web-parts) below for the standardWebPart shapes.
+- The tool injects `@odata.type` annotations where missing and validates `webPartType` GUIDs against the 14 Graph-supported web parts before sending the request — Graph's own error on unsupported web parts is uninformative.
+
+#### `update_site_page`
+Update page properties. **PATCH replaces `canvasLayout` wholesale** — there's no partial update path. To edit one web part, `get_site_page` with `expandCanvas: true`, mutate the returned layout, then PATCH it back.
+
+```json
+{
+  "site": "primary",
+  "pageId": "094ea58f-...",
+  "title": "Bienvenida actualizada",
+  "canvasLayout": { "horizontalSections": [ /* …full replacement… */ ] }
+}
+```
+
+Read-only fields (`name`, `pageLayout`, `webUrl`, `publishingState`, `id`, `createdBy`, etc.) cannot be PATCHed. After update, the page goes back to draft state with the minor version bumped — call `publish_site_page` to make it live again.
+
+#### `publish_site_page`
+Promote a draft/checked-out page to `published`. Bumps the version to the next major (e.g. `1.4 → 2.0`).
+
+```json
+{ "site": "primary", "pageId": "094ea58f-..." }
+```
+
+If a page-approval flow is configured on the Site Pages library, the page won't actually go live until the approval completes — the tool still returns success because the publish action itself succeeded.
+
+#### `delete_site_page`
+Move a page to the site's Recycle Bin.
+
+```json
+{ "site": "primary", "pageId": "094ea58f-..." }
+```
+
+---
+
+### Building site pages with web parts
+
+The `canvasLayout` shape is officially documented in pieces across the Graph reference but the real-world quirks aren't, so the highlights below are calibrated from probing the v1.0 API on 2026-05-23. Use these as the working contract — Microsoft's docs cover the abstract schema but skip almost every gotcha that matters in practice.
+
+#### Layout primitives
+
+- `horizontalSections[]` is the only required structural array. Each section has `layout`, optional `emphasis`, and `columns[]`.
+- `layout` values: `oneColumn`, `twoColumns`, `threeColumns`, `oneThirdLeftColumn`, `oneThirdRightColumn`, `fullWidth`. No five-column layout exists; for 5 cards do a `threeColumns` row + `twoColumns` row.
+- `emphasis` values: `none`, `neutral`, `soft`, `strong`. Microsoft's CSDL has a typo (`netural`) — the correct token is `neutral`.
+- Section / column ids are caller-assigned strings (`"1"`, `"2"`, …). If you omit them, the tool fills them in.
+
+#### Text web part — the easy case
+
+```json
+{ "@odata.type": "#microsoft.graph.textWebPart", "innerHtml": "<h2>…</h2><p>…</p>" }
+```
+
+SharePoint sanitizes the HTML but accepts `h1-h6`, `p`, `ul/ol/li`, `a`, `strong`, `em`, `br`, `span`. Inline styles are mostly stripped — don't rely on them.
+
+#### Standard web parts — the 14 GUIDs Graph accepts
+
+Only these `webPartType` values pass Graph's create/update validation. Anything else (hero, news, file viewer, etc.) is rejected with a misleading "Invalid request":
+
+| Web part | `webPartType` GUID |
+|---|---|
+| Bing Maps | `e377ea37-9047-43b9-8cdb-a761be2f8e09` |
+| Button | `0f087d7f-520e-42b7-89c0-496aaf979d58` |
+| Call to Action | `df8e44e7-edd5-46d5-90da-aca1539313b8` |
+| Divider | `2161a1c6-db61-4731-b97c-3cdb303f7cbb` |
+| Document Embed | `b7dd04e1-19ce-4b24-9132-b60a1c2b910d` |
+| Image | `d1d91016-032f-456d-98a4-721247c305e8` |
+| Image Gallery | `af8be689-990e-492a-81f7-ba3e4cd3ed9c` |
+| Link Preview | `6410b3b6-d440-4663-8744-378976dc041e` |
+| Org Chart | `e84a8ca2-f63c-4fb9-bc0b-d8eef5ccb22b` |
+| People | `7f718435-ee4d-431c-bdbf-9c4ff326f46e` |
+| Quick Links | `c70391ea-0b10-4ee9-b2b4-006d3fcad0cd` |
+| Spacer | `8654b779-4886-46d4-8ffb-b5ed960ee986` |
+| YouTube Embed | `544dd15b-cf3c-441b-96da-004d5a8cea1d` |
+| Title Area (internal) | `cbe7b0a9-3504-44dd-a3a3-0e5cacd07788` |
+
+`create_site_page` validates against this list and rejects unknown GUIDs up-front.
+
+#### `@odata.type` annotations are mandatory
+
+Every standardWebPart needs three annotations or Graph's OData parser rejects with `"Parsing JSON Light resource sets or entries in requests without entity set is not supported"`:
+
+```json
+{
+  "@odata.type": "#microsoft.graph.standardWebPart",
+  "webPartType": "<guid>",
+  "data": {
+    "@odata.type": "#microsoft.graph.webPartData",
+    "dataVersion": "1.0",
+    "title": "…",
+    "properties": { … },
+    "serverProcessedContent": {
+      "@odata.type": "#microsoft.graph.serverProcessedContent",
+      "links": [ … ]
+    }
+  }
+}
+```
+
+The MCP wrapper injects these when missing, but if you build the body by hand (e.g. through `batch_operations` against the raw Graph endpoint) you must include all three.
+
+#### `serverProcessedContent` shape
+
+It's four parallel `metaDataKeyStringPair` arrays, never an object map:
+
+```json
+"serverProcessedContent": {
+  "@odata.type": "#microsoft.graph.serverProcessedContent",
+  "searchablePlainTexts": [{ "key": "itemTitle", "value": "Empresas" }],
+  "imageSources": [{ "key": "imageSource", "value": "https://…/banner.png" }],
+  "links": [{ "key": "linkUrl", "value": "https://…" }],
+  "htmlStrings": []
+}
+```
+
+The `key` field is the *property name* that the client-side renderer reads — it's web-part-specific and not documented per web part. For the URL on a Button web part it must be `linkUrl`; `url` is silently ignored on click. Build a test page with the URL in multiple candidate keys, render, and observe which navigates.
+
+#### Canonical Button web part (navigation card)
+
+This is the shape that actually works — both the server (Graph) accepts it and the client (SharePoint web part renderer) wires the click handler:
+
+```json
+{
+  "@odata.type": "#microsoft.graph.standardWebPart",
+  "webPartType": "0f087d7f-520e-42b7-89c0-496aaf979d58",
+  "data": {
+    "@odata.type": "#microsoft.graph.webPartData",
+    "dataVersion": "1.0",
+    "title": "Empresas",
+    "properties": {
+      "label": "📁 Empresas",
+      "alignment": "Center",
+      "buttonTreatment": "Filled",
+      "openInNewTab": false
+    },
+    "serverProcessedContent": {
+      "@odata.type": "#microsoft.graph.serverProcessedContent",
+      "links": [{ "key": "linkUrl", "value": "https://…/folder" }]
+    }
+  }
+}
+```
+
+For a row of N navigation cards, put N Buttons in a `threeColumns` section (each column `width: 4`).
+
+#### Quick Links is not viable via Graph
+
+The Quick Links web part (`c70391ea-…`) is on the GUID allowlist, but it's a dead end:
+
+- `properties.items` as a native array → Graph rejects with the OData "JSON Light resource sets" error (the OData open-type parser can't infer the type of nested objects in an array).
+- `properties.items` as a JSON-stringified string → Graph accepts and stores, but the client-side renderer crashes with `a.forEach is not a function` because it expects a real array.
+
+There's no shape that satisfies both server and client. **Use the Button shape above in a `threeColumns` layout instead** — it's the same visual outcome (a row of navigation cards) without the bugs.
+
+#### Canvas-layout PATCH replaces everything
+
+`update_site_page` overwrites the entire `canvasLayout`. To add or modify one web part on an existing page:
+
+1. `get_site_page` with `expandCanvas: true`
+2. Mutate the returned `canvasLayout` JSON
+3. `update_site_page` with the mutated structure
+4. `publish_site_page` to promote draft → live
+
+#### Permissions
+
+All page tools work under the existing `Sites.ReadWrite.All` delegated scope this fork already requests. No new consent needed.
 
 ---
 

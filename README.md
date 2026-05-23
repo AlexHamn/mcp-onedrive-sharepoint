@@ -5,7 +5,7 @@
 [![MCP](https://img.shields.io/badge/MCP-compatible-8A2BE2.svg)](https://modelcontextprotocol.io)
 [![TypeScript](https://img.shields.io/badge/typescript-%5E5.9-3178c6.svg)](https://www.typescriptlang.org)
 
-MCP server for Microsoft Graph focused on OneDrive, SharePoint and related document workflows. Device-code or client-credentials auth, 37 tools, also usable as a standalone `ods` CLI for shell scripting.
+MCP server for Microsoft Graph focused on OneDrive, SharePoint and related document workflows. Device-code or client-credentials auth, 43 tools, also usable as a standalone `ods` CLI for shell scripting.
 
 📖 **Long-form usage guide:** see [`docs/USAGE.md`](docs/USAGE.md) for the full tool reference, Azure app-registration cookbook, MCP-client wiring snippets, and common workflows.
 
@@ -19,10 +19,10 @@ Onboarding commands on a clean clone:
 
 ## What is implemented
 
-The server exposes 37 MCP tools grouped into:
+The server exposes 43 MCP tools grouped into:
 
 - Files: `list_files`, `download_file`, `upload_file`, `create_folder`, `move_item`, `delete_item`, `search_files`, `get_file_metadata`, `share_item`, `copy_item`
-- SharePoint: `discover_sites`, `resolve_site`, `list_site_lists`, `get_list_schema`, `list_items`, `get_list_item`, `create_list_item`, `update_list_item`, `delete_list_item`, `create_communication_site`, `create_team_site`, `create_team_site_classic`, `get_site_creation_status`
+- SharePoint: `discover_sites`, `resolve_site`, `list_site_lists`, `get_list_schema`, `list_items`, `get_list_item`, `create_list_item`, `update_list_item`, `delete_list_item`, `create_communication_site`, `create_team_site`, `create_team_site_classic`, `get_site_creation_status`, `list_site_pages`, `get_site_page`, `create_site_page`, `update_site_page`, `publish_site_page`, `delete_site_page`
 - Utilities: `health_check`, `get_user_profile`, `list_drives`, `global_search`, `batch_operations`
 - Advanced: `advanced_share`, `manage_permissions`, `check_user_access`, `sync_folder`, `batch_file_operations`, `storage_analytics`, `version_management`, `excel_operations`, `excel_analysis`
 

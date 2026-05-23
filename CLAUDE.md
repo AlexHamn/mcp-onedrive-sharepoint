@@ -4,7 +4,7 @@ Context for Claude Code sessions working in this repo. Read this first; for the 
 
 ## What this is
 
-A fork of [`ftaricano/mcp-onedrive-sharepoint`](https://github.com/ftaricano/mcp-onedrive-sharepoint), patched and dependency-refreshed (v1.1). Exposes 37 MCP tools that drive Microsoft Graph for OneDrive / SharePoint operations. This fork is configured for an internal Lanpro Microsoft 365 tenant — operator identity, tenant ID, and registered site aliases live in machine-local files (see [Local-only state](#local-only-state) below); none of that is committed.
+A fork of [`ftaricano/mcp-onedrive-sharepoint`](https://github.com/ftaricano/mcp-onedrive-sharepoint), patched and dependency-refreshed (v1.1). Exposes 43 MCP tools that drive Microsoft Graph for OneDrive / SharePoint operations. This fork is configured for an internal Lanpro Microsoft 365 tenant — operator identity, tenant ID, and registered site aliases live in machine-local files (see [Local-only state](#local-only-state) below); none of that is committed.
 
 The operator owns the tenant and has full admin rights (can grant admin consent, create app registrations, modify tenant-wide settings). Don't gate suggestions on "ask your IT admin"; if something needs an Azure portal click, walk them through it directly.
 
